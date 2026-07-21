@@ -2,7 +2,6 @@ import express from "express";
 import {
   getSales,
   getSalesLapse,
-  getSalesPlan,
   saveCompany,
   updateCompany,
   deleteCompany,

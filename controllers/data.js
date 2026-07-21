@@ -1,7 +1,6 @@
 import CompanyData from "../models/Company.js";
 import User from "../models/User.js";
 import dayjs from "dayjs"
-import moment from "moment-timezone"
 import mongoose from "mongoose";
 import { Types } from "mongoose";
 import fs from "fs/promises"
@@ -9,47 +8,38 @@ import fs from "fs/promises"
 
 export const saveSales = async (req, res) => {
 
-  const session = await mongoose.startSession();
-
   try {
 
-    await session.withTransaction(async () => {
-      
-      const {
-        userId,
-        companyId,
-        date,
-        contents,
-        savedDocName,
-        salesStatus
-      } = req.body;
+    const {
+      userId,
+      companyId,
+      date,
+      contents,
+      savedDocName,
+      salesStatus
+    } = req.body;
     
-      const company = await CompanyData.findByIdAndUpdate(
-        companyId,
-        {
-          status: salesStatus,
-          $push: {
-            sales: {
-              date,
-              contents,
-              savedDocName: req.file ? req.file.filename : savedDocName,
-              salesStatus
-          }}
-        },
-        {new: true}
-      );
+    const company = await CompanyData.findByIdAndUpdate(
+      companyId,
+      {
+        status: salesStatus,
+        $push: {
+          sales: {
+            date,
+            contents,
+            savedDocName: req.file ? req.file.filename : savedDocName,
+            salesStatus
+        }}
+      },
+      {new: true}
+    );
 
-      res.status(201).json(company);
-
-    })
-
+    res.status(201).json(company);
     
   } catch (err) {
-    res.status(409).json({ msg: err.message });
+    res.status(409).json(err.message);
   }
-  finally {
-    await session.endSession();
-  }
+
 }
 
 export const updateSales = async (req, res) => {
@@ -95,17 +85,14 @@ export const updateSales = async (req, res) => {
         await fs.unlink("../uploaded_files/" + originalSavedDocName);
       }
     }
-      
-    
   } catch (err) {
-    res.status(409).json({ message: err.message });
+    res.status(409).json(err.message);
   }
 }
 
 export const deleteSales = async (req, res) => {
   try {
-    
-
+  
     const { companyId, salesId, savedDocName } = req.body;
 
     const deleted = await CompanyData.findByIdAndUpdate(
@@ -121,11 +108,173 @@ export const deleteSales = async (req, res) => {
     res.status(201).json(deleted);
     
   } catch (err) {
-    res.status(409).json({ msg: err.message });
+    res.status(409).json(err.message);
   }
 }
 
+export const getSales = async (req, res) => {
+  const {
+    userId,
+    userName,
+    searchWhat,
+    companyRegistNo,
+    exceptEnd,
+    from,
+    to,
+    region1,
+    region2,
+    region3,
+    salesType,
+    status,
+    companion,
+    group,
+    mainUser,
+  } = req.body;
+
+  try {
+    let query;
+
+    if (mainUser) {
+      query = {
+        userId: mainUser._id,
+        $and: [],
+      };
+    } else {
+      query = {
+        userId: userId,
+        $and: [],
+      };
+    }
+
+    if (searchWhat === "companyName") {
+      if (companyRegistNo !== "")
+        query.companyName = {
+          $regex: companyRegistNo,
+          $options: "i",
+        };
+    } else if (searchWhat === "registNo") {
+      if (companyRegistNo !== "") query.registNo = companyRegistNo;
+    }
+
+    if (from !== "" || to !== "") {
+      query["sales.date"] = {
+        $gte: from === "" ? "2000-01-01" : from,
+        $lte: to === "" ? "2999-12-31" : to,
+      };
+    }
+
+    query.$and.push({ address: { $regex: region1, $options: "i" } });
+    query.$and.push({ address: { $regex: region2, $options: "i" } });
+    query.$and.push({ address: { $regex: region3, $options: "i" } });
+
+    if (exceptEnd === "종료제외") {
+      if (status === "전체") query.status = { $ne: "종료" };
+      else query.status = status;
+    } else {
+      if (status !== "전체") query.status = status;
+    }
+
+    if (salesType !== "전체") {
+      query.salesType = salesType;
+    }
+
+    if (mainUser) {
+      query.companion = userName;
+      if (group !== "전체") {
+        query.group = group;
+      }
+    } else {
+      if (companion === "미지정") {
+        query.companion = "";
+      } else {
+        if (companion !== "전체") {
+          query.companion = companion;
+        }
+        if (group !== "전체") {
+          query.group = group;
+        }
+      }
+    }
+
+    const count = await CompanyData.countDocuments(query);
+    const companies = await CompanyData.find(query)
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    res.status(201).json({ companies, count });
+  } catch (err) {
+    res.status(409).json(err.message);
+  }
+};
+
+export const getSalesLapse = async (req, res) => {
+  const {
+    userId,
+    lapse,
+    region1,
+    region2,
+    region3,
+    salesType,
+    status,
+    companion,
+    group,
+  } = req.body;
+
+  const date = new Date();
+  date.setDate(date.getDate() - lapse);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+
+  try {
+    const query = {
+      userId: userId,
+      $and: [],
+      $expr: {
+        $and: [
+          { $gte: [{ $size: "$sales" }, 1] },
+          {
+            $lte: [
+              { $arrayElemAt: ["$sales.date", -1] },
+              `${yyyy}-${mm}-${dd}`,
+            ],
+          },
+        ],
+      },
+    };
+
+    query.$and.push({ address: { $regex: region1, $options: "i" } });
+    query.$and.push({ address: { $regex: region2, $options: "i" } });
+    query.$and.push({ address: { $regex: region3, $options: "i" } });
+
+    if (salesType !== "전체") {
+      query.salesType = salesType;
+    }
+    if (companion === "미지정") {
+      query.companion = "";
+    } else {
+      if (companion !== "전체") {
+        query.companion = companion;
+      }
+      if (group !== "전체") {
+        query.group = group;
+      }
+    }
+
+    const count = await CompanyData.countDocuments(query);
+
+    const companies = await CompanyData.find(query)
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    res.status(201).json({ companies, count });
+  } catch (err) {
+    res.status(409).json(err.message);
+  }
+};
+
 export const getStatistics = async (req, res) => {
+
   const { userId, userName, mainUser } = req.body
   
   const today = new Date();
@@ -166,7 +315,6 @@ export const getStatistics = async (req, res) => {
     return { startDate: sDate.toUTCString(), endDate: eDate.toUTCString() };
   }
   
-
   try {
 
     let companyCount;
@@ -452,9 +600,85 @@ export const getStatistics = async (req, res) => {
       });
 
   } catch (err) {
-    res.status(409).json({ message: err.message });
+    res.status(409).json(err.message);
   }
-};
+}
+
+export const saveCompany = async (req, res) => {
+  try {
+    const {
+      userId,
+      companyName,
+      registNo,
+      ceo,
+      age,
+      companyType,
+      salesType,
+      employees,
+      grossRevenue,
+      netProfit,
+      suspenseAccount,
+      retainedEarnings,
+      industry,
+      address,
+      phone,
+      groupInsu,
+      companyInsu,
+      companion,
+      group,
+      status,
+    } = req.body;
+
+    const reqData = {
+      userId,
+      companyName,
+      registNo,
+      ceo,
+      age,
+      companyType,
+      salesType,
+      employees,
+      grossRevenue,
+      netProfit,
+      suspenseAccount,
+      retainedEarnings,
+      industry,
+      address,
+      phone,
+      groupInsu,
+      companyInsu,
+      companion,
+      group,
+      status,
+      sales: [],
+    };
+
+    if (companyName !== "" && registNo === "") {
+      const company = await CompanyData.findOne({ userId, companyName });
+      if (company) {
+        res
+          .status(409)
+          .json({ msg: "동일한 이름으로 등록된 업체가 이미 있습니다" });
+        return;
+      }
+    }
+
+    if (registNo !== "") {
+      const company = await CompanyData.findOne({ userId, registNo });
+      if (company) {
+        res.status(409).json({ msg: "이미 등록된 사업자등록번호입니다" });
+        return;
+      }
+    }
+
+    const data = new CompanyData(reqData);
+    const saved = await data.save();
+    res.status(201).json(saved);
+
+  } catch (err) {
+    res.status(500).json(err.message);
+  }
+}
 
 export const getCompanies = async (req, res) => {
 
@@ -539,310 +763,9 @@ export const getCompanies = async (req, res) => {
 
     res.status(201).json({ companies, count });
   } catch (err) {
-    res.status(409).json({ message: err.message });
+    res.status(409).json(err.message);
   }
-};
-
-export const getSales = async (req, res) => {
-  const {
-    userId,
-    userName,
-    searchWhat,
-    companyRegistNo,
-    exceptEnd,
-    from,
-    to,
-    region1,
-    region2,
-    region3,
-    salesType,
-    status,
-    companion,
-    group,
-    mainUser
-  } = req.body;
-
-  try {
-    let query;
-
-    if (mainUser) {
-      query = {
-        userId: mainUser._id,
-        $and: [],
-      };
-    } else {
-      query = {
-        userId: userId,
-        $and: [],
-      };
-    }
-
-    if (searchWhat === "companyName") {
-      if (companyRegistNo !== "")
-        query.companyName = {
-          $regex: companyRegistNo,
-          $options: "i",
-        };
-    } else if (searchWhat === "registNo") {
-      if (companyRegistNo !== "")
-        query.registNo = companyRegistNo;
-    }
-    
-    if (from !== "" || to !== "") {
-      query["sales.date"] = {
-        $gte: from === "" ? "2000-01-01" : from,
-        $lte: to === "" ? "2999-12-31" : to,
-      };
-    }
-
-    query.$and.push({address: { $regex: region1, $options: "i" }})
-    query.$and.push({address: { $regex: region2, $options: "i" }})
-    query.$and.push({address: { $regex: region3, $options: "i" }})
-
-
-    if (exceptEnd === "종료제외") {
-      if (status === "전체") query.status = { $ne: "종료" }
-      else query.status = status
-    } else {
-      if (status !== "전체") query.status = status
-    }
-
-    if (salesType !== "전체") {
-      query.salesType = salesType;
-    }
-
-    if (mainUser) {
-      query.companion = userName;
-      if (group !== "전체") {
-        query.group = group;
-      }
-    } else {
-      if (companion === "미지정") {
-        query.companion = "";
-      } else {
-        if (companion !== "전체") {
-          query.companion = companion;
-        }
-        if (group !== "전체") {
-          query.group = group;
-        }
-      }
-    }
-    
-    const count = await CompanyData.countDocuments(query);
-    const companies = await CompanyData.find(query).sort({ createdAt: -1 }).limit(100)
-  
-
-    res.status(201).json({companies, count});
-
-  } catch (err) {
-    res.status(409).json({ message: err.message });
-  }
-};
-
-export const getSalesLapse = async (req, res) => {
-
-  const { userId, lapse, region1, region2, region3, salesType, status, companion, group} = req.body
-
-  const date = new Date();
-  date.setDate(date.getDate() - lapse);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-
-
-  try {
-    const query = {
-      userId: userId,
-      $and: [],
-      $expr: {
-        $and: [
-          { $gte: [{ $size: "$sales" }, 1] },
-          {
-            $lte: [
-              { $arrayElemAt: ["$sales.date", -1] },
-              `${yyyy}-${mm}-${dd}`,
-            ],
-          },
-        ],
-      },
-    };
-
-    query.$and.push({ address: { $regex: region1, $options: "i" } });
-    query.$and.push({ address: { $regex: region2, $options: "i" } });
-    query.$and.push({ address: { $regex: region3, $options: "i" } });
-
-    if (salesType !== "전체") {
-      query.salesType = salesType;
-    }
-    if (companion === "미지정") {
-      query.companion = "";
-    } else {
-      if (companion !== "전체") {
-        query.companion = companion;
-      }
-      if (group !== "전체") {
-        query.group = group;
-      }
-    }
-
-    const count = await CompanyData.countDocuments(query);
-
-    const companies = await CompanyData.find(query)
-      .sort({ createdAt: -1 })
-      .limit(100);
-
-    res.status(201).json({ companies, count });
-  } catch (err) {
-    res.status(409).json({ message: err.message });
-  }
-};
-
-export const getSalesPlan = async (req, res) => {
-
-  const { userId, plan } = req.body
-
-  let today = new Date();
-  today.setDate(today.getDate());
-  let yyyy = today.getFullYear();
-  let mm = String(today.getMonth() + 1).padStart(2, "0");
-  let dd = String(today.getDate()).padStart(2, "0");
-  today = `${yyyy}-${mm}-${dd}`;
-
-  let planned = new Date();
-  planned.setDate(planned.getDate() + Number(plan));
-  yyyy = planned.getFullYear();
-  mm = String(planned.getMonth() + 1).padStart(2, "0");
-  dd = String(planned.getDate()).padStart(2, "0");
-  planned = `${yyyy}-${mm}-${dd}`;
-
-  const query = {
-    userId: userId
-  }
-  
-  if (plan === "-1") {
-    query.revisit = {
-      $ne: "",
-      $lt: today,
-    };
-  } else {
-    query.revisit = {
-        $gte: today,
-        $lte: planned
-      }
-  }
-    
-  try {
-    
-    const result = await SalesData.find(query).populate('company').sort({ revisit: -1 });
-
-    const responses = result.filter(function (value) {
-      return value.company !== null;
-    });
-
-    res.status(201).json(responses);
-  } catch (err) {
-    res.status(409).json({ message: err.message });
-  }
-};
-
-export const companyVerify = async (req, res) => {
-  
-  const { userId, companyName, registNo} = req.body
-  
-  try {
-
-    if (companyName !== "" && registNo === "") {
-      const exist = await CompanyData.exists({ userId, companyName });
-      if (exist) {
-        res.status(200).json({ state: 1, msg: "동일한 이름의 업체가 이미 등록되어 있습니다" });
-        return
-      }
-    } else if (companyName !== "" && registNo !== "") {
-      const exist = await CompanyData.exists({ userId, companyName, registNo });
-      if (exist) {
-        res.status(200).json({ state: 2, msg: "동일한 사업자등록번호의 업체가 이미 등록되어 있습니다" });
-        return
-      }
-    }
-    res.status(200).json({ state: 3, msg: "등록 가능한 업체입니다" });
-  } catch (err) {
-    res.status(409).json({ msg: err.message });
-  }
-};
-
-export const saveCompany = async (req, res) => {
-  try {
-    const {
-      userId,
-      companyName,
-      registNo,
-      ceo,
-      age,
-      companyType,
-      salesType,
-      employees,
-      grossRevenue,
-      netProfit,
-      suspenseAccount,
-      retainedEarnings,
-      industry,
-      address,
-      phone,
-      groupInsu,
-      companyInsu,
-      companion,
-      group,
-      status,
-    } = req.body;
-
-    const reqData = {
-      userId,
-      companyName,
-      registNo,
-      ceo,
-      age,
-      companyType,
-      salesType,
-      employees,
-      grossRevenue,
-      netProfit,
-      suspenseAccount,
-      retainedEarnings,
-      industry,
-      address,
-      phone,
-      groupInsu,
-      companyInsu,
-      companion,
-      group,
-      status,
-      sales: [],
-    };
-
-      if (companyName !== "" && registNo === "") {
-        const company = await CompanyData.findOne({ userId, companyName });
-        if (company) {
-          res.status(409).json({ msg: "동일한 이름으로 등록된 업체가 이미 있습니다" });
-          return;
-        }
-      }
-    
-      if (registNo !== "") {
-        const company = await CompanyData.findOne({ userId, registNo })
-        if (company) {
-          res.status(409).json({ msg: "이미 등록된 사업자등록번호입니다" });
-          return
-        }
-      }
-    
-      const data = new CompanyData(reqData);
-      const saved = await data.save();
-      res.status(201).json(saved);
-  } catch (err) {
-    res.status(500).json({ msg: err.message });
-  }
-};
+}
 
 export const updateCompany = async (req, res) => {
   try {
@@ -896,34 +819,32 @@ export const updateCompany = async (req, res) => {
       status,
     };
 
-      if ( originalCompanyName !== companyName) {
-        const company = await CompanyData.findOne({ userId, companyName });
-        if (company) {
-          res
-            .status(409)
-            .json({ msg: "동일한 이름으로 등록된 업체가 이미 있습니다" });
-          return;
-        }
+    if (originalCompanyName !== companyName) {
+      const company = await CompanyData.findOne({ userId, companyName });
+      if (company) {
+        res
+          .status(409)
+          .json({ msg: "동일한 이름으로 등록된 업체가 이미 있습니다" });
+        return;
       }
-    
-      if (registNo !== "" && originalRegistNo !== registNo) {
-        const company = await CompanyData.findOne({ userId, registNo })
-        if (company) {
-          res.status(409).json({ msg: "이미 등록된 사업자등록번호입니다" });
-          return
-        }
+    }
+
+    if (registNo !== "" && originalRegistNo !== registNo) {
+      const company = await CompanyData.findOne({ userId, registNo });
+      if (company) {
+        res.status(409).json({ msg: "이미 등록된 사업자등록번호입니다" });
+        return;
       }
-    
-    const updated = await CompanyData.findByIdAndUpdate(
-      companyId,
-      reqData,
-      { new: true}
-    );
-      res.status(201).json(updated);
+    }
+
+    const updated = await CompanyData.findByIdAndUpdate(companyId, reqData, {
+      new: true,
+    });
+    res.status(201).json(updated);
   } catch (err) {
-    res.status(500).json({ msg: err.message });
+    res.status(500).json(err.message);
   }
-};
+}
 
 export const deleteCompany = async (req, res) => {
   try {
@@ -933,11 +854,32 @@ export const deleteCompany = async (req, res) => {
 
     res.status(201).json(deleted);
   } catch (err) {
-    res.status(409).json({ msg: err.message });
+    res.status(409).json(err.message);
   }
-};
+}
 
-/* READ */
+export const companyVerify = async (req, res) => {
+
+  const { userId, companyName, registNo } = req.body;
+
+  try {
+    if (companyName !== "" && registNo === "") {
+      const exist = await CompanyData.exists({ userId, companyName });
+      if (exist) {
+        throw new Error("동일한 이름의 업체가 이미 등록되어 있습니다")
+      }
+    } else if (companyName !== "" && registNo !== "") {
+      const exist = await CompanyData.exists({ userId, companyName, registNo });
+      if (exist) {
+        throw new Error("동일한 사업자등록번호의 업체가 이미 등록되어 있습니다")
+      }
+    }
+    res.status(200).json({msg: "등록 가능한 업체입니다"});
+  } catch (err) {
+    res.status(409).json(err.message);
+  }
+}
+
 export const addCompanion = async (req, res) => {
   try {
 
@@ -951,9 +893,35 @@ export const addCompanion = async (req, res) => {
     res.status(200).json(newCompanion);
 
   } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(409).json(err.message);
   }
-};
+}
+
+export const deleteCompanion = async (req, res) => {
+  try {
+
+    const { userId, companion} = req.body
+
+    const isExist = await CompanyData.exists({
+      userId,
+      companion: companion,
+    });
+
+    if (isExist !== null) {
+      throw new Error("업체 정보에 이미 사용된 공동영업자는 삭제할 수 없습니다.\n먼저 업체정보를 모두 삭제해야 합니다.")
+    }
+
+    const newCompanion = await User.findByIdAndUpdate(
+      {_id: userId},
+      { $pull: { companion: {name: companion} } },
+      { new: true }
+    )
+    res.status(200).json(newCompanion);
+
+  } catch (err) {
+    res.status(409).json(err.message);
+  }
+}
 
 export const addGroup = async (req, res) => {
   try {
@@ -974,58 +942,30 @@ export const addGroup = async (req, res) => {
     res.status(200).json(updatedUser);
 
   } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(409).json(err.message);
   }
-};
-
-export const deleteCompanion = async (req, res) => {
-  try {
-
-    const { userId, companion, group } = req.body
-
-    const isExist = await CompanyData.find({
-      userId,
-      companion
-    })
-
-    if (isExist.length > 0) {
-      throw "업체 정보에 이미 사용된 공동영업자는 삭제할 수 없습니다."
-      return
-    }
-
-    const newCompanion = await User.findByIdAndUpdate(
-      userId,
-      { $pull: { companion: {name: companion} } },
-      { new: true }
-    )
-    res.status(200).json(newCompanion);
-
-  } catch (err) {
-    res.status(404).json({ msg: err });
-  }
-};
+}
 
 export const deleteGroup = async (req, res) => {
   try {
 
     const { userId, companion, group } = req.body
 
-    const isExist = await CompanyData.find(
-    {
-      userId,
-      companion,
-      group
-    }
+    const isExist = await CompanyData.exists(
+      {
+        userId,
+        companion,
+        group
+      }
     )
 
-    if (isExist.length > 0) {
-      throw "업체 정보에 이미 사용된 그룹은 삭제할 수 없습니다."
-      return
+    if (isExist !== null) {
+      throw new Error("업체 정보에 이미 사용된 그룹은 삭제할 수 없습니다.")
     }
 
     const newGroup = await User.findOneAndUpdate(
       {
-        userId,
+        _id: userId,
         "companion.name": companion
       },
       { $pull: {"companion.$.groups": group} },
@@ -1035,7 +975,7 @@ export const deleteGroup = async (req, res) => {
     res.status(200).json(newGroup);
 
   } catch (err) {
-    res.status(404).json({ msg: err });
+    res.status(409).json(err.message);
   }
 };
 
@@ -1084,43 +1024,7 @@ export const createReport = async (req, res) => {
     res.status(200).json(categories);
 
   } catch (err) {
-    res.status(404).json({ msg: err });
-  }
-};
-
-export const getUserPosts = async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const post = await Post.find({ userId });
-    res.status(200).json(post);
-  } catch (err) {
-    res.status(404).json({ message: err.message });
-  }
-};
-
-/* UPDATE */
-export const likePost = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { userId } = req.body;
-    const post = await Post.findById(id);
-    const isLiked = post.likes.get(userId);
-
-    if (isLiked) {
-      post.likes.delete(userId);
-    } else {
-      post.likes.set(userId, true);
-    }
-
-    const updatedPost = await Post.findByIdAndUpdate(
-      id,
-      { likes: post.likes },
-      { new: true } //update된 값을 준다. 
-    );
-
-    res.status(200).json(updatedPost);
-  } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(404).json(err.message);
   }
 };
 
@@ -1189,7 +1093,7 @@ export const uploadCompanies = async (req, res) => {
 
     res.status(200).json(newData);
   } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(404).json(err.message);
   }
 };
 export const getMainUsers = async (req, res) => {
@@ -1207,7 +1111,7 @@ export const getMainUsers = async (req, res) => {
 
     res.status(200).json(mainUsers);
   } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(404).json(err.message);
   }
 };
 
@@ -1219,7 +1123,7 @@ export const getAllUsers = async (req, res) => {
 
     res.status(200).json(allUsers);
   } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(404).json(err.message);
   }
 };
 
@@ -1243,7 +1147,7 @@ export const updateApproval = async (req, res) => {
 
     res.status(200).json(updated);
   } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(404).json(err.message);
   }
 };
 
@@ -1267,7 +1171,7 @@ export const updateSuspended = async (req, res) => {
     
     res.status(200).json(updated);
   } catch (err) {
-    res.status(404).json({ message: err.message });
+    res.status(404).json(err.message);
   }
 };
 

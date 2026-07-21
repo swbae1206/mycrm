@@ -10,6 +10,11 @@ const salesSchema = mongoose.Schema({
   salesStatus: String
 })
 
+const contactsSchema = mongoose.Schema({
+  name: String,
+  phone: String
+})
+
 
 const companySchema = mongoose.Schema(
   {
@@ -41,7 +46,7 @@ const companySchema = mongoose.Schema(
     companion: String,
     group: String,
     status: String,
-    sales: [salesSchema],
+    sales: [salesSchema]
   },
   { timestamps: true },
 );
