@@ -229,6 +229,7 @@ export const getSalesLapse = async (req, res) => {
   try {
     const query = {
       userId: userId,
+      status: { $ne: "종료"},
       $and: [],
       $expr: {
         $and: [
@@ -587,17 +588,60 @@ export const getStatistics = async (req, res) => {
           mResult.push({ monthCompanyCount, monthSalesCount: monthSalesCount[0]?.totalSalesCount });
     }
 
-    res
-      .status(201)
-      .json({
-        companyCount,
-        salesCount: salesCount[0]?.total_sum,
-        weekCompanyCount,
-        weekSalesCount: weekSalesCount[0]?.totalSalesCount,
-        months,
-        monthCompany,
-        monthSales
-      });
+    const totalGroups = await CompanyData.aggregate([
+      // 1단계: 특정 user의 도큐먼트만 필터링 (가장 먼저 처리해야 성능에 좋습니다)
+      {
+        $match: {
+          // user 필드가 ObjectId인 경우 mongoose.Types.ObjectId()로 감싸주어야 합니다.
+          userId,
+        },
+      },
+      // 2단계: 필터링된 데이터들을 group 필드별로 묶고 amount의 합계를 구함
+      {
+        $group: {
+          _id: "$group",
+          totalSum: { $sum: 1 },
+        },
+      },
+      // 3단계: 합계(totalSum) 기준 내림차순 정렬
+      {
+        $sort: {
+          totalSum: -1,
+        },
+      },
+      // 4단계: 상위 4개만 선택
+      {
+        $limit: 4,
+      },
+      // 5단계: 결과 데이터 포맷 예쁘게 다듬기 (선택사항)
+      {
+        $project: {
+          _id: 0,
+          group: "$_id",
+          totalSum: 1,
+        },
+      },
+    ])
+
+    const groupTotalNums = totalGroups.map((item) => item.totalSum);
+
+    const groupNames = totalGroups.map((item) => item.group);
+
+    const uniqueGroups = await CompanyData.distinct("group", { userId });
+    const totalGroupNums = uniqueGroups.length
+
+    res.status(201).json({
+      companyCount,
+      salesCount: salesCount[0]?.total_sum,
+      weekCompanyCount,
+      weekSalesCount: weekSalesCount[0]?.totalSalesCount,
+      months,
+      monthCompany,
+      monthSales,
+      groupNames,
+      groupTotalNums,
+      totalGroupNums,
+    });
 
   } catch (err) {
     res.status(409).json(err.message);
