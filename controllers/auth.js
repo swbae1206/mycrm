@@ -111,12 +111,9 @@ export const login = async (req, res) => {
   try {
     const { phone, password } = req.body;
 
-    console.log(phone, password)
-
     const user = await User.findOne({ phone: phone });
     if (!user) return res.status(400).json({ msg: "존재하지 않는 사용자입니다 " });
 
-    console.log(user)
     if (user.approval === false) {
        throw new Error("관리자 승인이 되지 않았습니다. 관리자의 승인 후 사용가능합니다.");
     }
