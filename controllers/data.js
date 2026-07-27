@@ -210,6 +210,8 @@ export const getSales = async (req, res) => {
 export const getSalesLapse = async (req, res) => {
   const {
     userId,
+    userName,
+    mainUser,
     lapse,
     region1,
     region2,
@@ -227,9 +229,9 @@ export const getSalesLapse = async (req, res) => {
   const dd = String(date.getDate()).padStart(2, "0");
 
   try {
+
     const query = {
-      userId: userId,
-      status: { $ne: "종료"},
+      status: { $ne: "종료" },
       $and: [],
       $expr: {
         $and: [
@@ -243,6 +245,13 @@ export const getSalesLapse = async (req, res) => {
         ],
       },
     };
+
+    if (!mainUser) {
+      query.userId = userId
+    } else {
+      query.userId = mainUser._id
+      query.companion = userName
+    }
 
     query.$and.push({ address: { $regex: region1, $options: "i" } });
     query.$and.push({ address: { $regex: region2, $options: "i" } });
@@ -318,8 +327,9 @@ export const getStatistics = async (req, res) => {
   
   try {
 
-    let companyCount;
-    let salesCount;
+    let companyCount
+    let salesCount
+    let query
 
     if (mainUser) {
       companyCount = await CompanyData.countDocuments({ userId: mainUser._id, companion: userName });
@@ -588,32 +598,36 @@ export const getStatistics = async (req, res) => {
           mResult.push({ monthCompanyCount, monthSalesCount: monthSalesCount[0]?.totalSalesCount });
     }
 
-    const totalGroups = await CompanyData.aggregate([
-      // 1단계: 특정 user의 도큐먼트만 필터링 (가장 먼저 처리해야 성능에 좋습니다)
-      {
+    if (!mainUser) {
+      query = {
         $match: {
-          // user 필드가 ObjectId인 경우 mongoose.Types.ObjectId()로 감싸주어야 합니다.
           userId,
         },
-      },
-      // 2단계: 필터링된 데이터들을 group 필드별로 묶고 amount의 합계를 구함
+      };
+    } else {
+      query = {
+        $match: {
+          userId: mainUser._id,
+          companion: userName
+        },
+      };
+    }
+    const totalGroups = await CompanyData.aggregate([
+      query,
       {
         $group: {
           _id: "$group",
           totalSum: { $sum: 1 },
         },
       },
-      // 3단계: 합계(totalSum) 기준 내림차순 정렬
       {
         $sort: {
           totalSum: -1,
         },
       },
-      // 4단계: 상위 4개만 선택
       {
         $limit: 4,
       },
-      // 5단계: 결과 데이터 포맷 예쁘게 다듬기 (선택사항)
       {
         $project: {
           _id: 0,
@@ -627,7 +641,12 @@ export const getStatistics = async (req, res) => {
 
     const groupNames = totalGroups.map((item) => item.group);
 
-    const uniqueGroups = await CompanyData.distinct("group", { userId });
+    if (!mainUser) {
+      query = { userId }
+    } else {
+      query = {userId: mainUser._id, companion: userName}
+    }
+    const uniqueGroups = await CompanyData.distinct("group", query);
     const totalGroupNums = uniqueGroups.length
 
     res.status(201).json({

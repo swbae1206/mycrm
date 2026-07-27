@@ -49,7 +49,7 @@ export const register = async (req, res) => {
     
     const exist = await User.findOne({ phone });
     if (exist) {
-      return res.status(400).json({ msg: "이미 등록된 전화번호 입니다 " });
+      throw new Error("이미 등록된 전화번호입니다.")
     }
 
     const salt = await bcrypt.genSalt();
@@ -60,7 +60,7 @@ export const register = async (req, res) => {
       phone,
       password: passwordHash,
       picturePath,
-      approval: "N",
+      approval: false,
       companion: [
         {
           name: "단독",
@@ -72,9 +72,10 @@ export const register = async (req, res) => {
     res.status(201).json(savedUser);
 
   } catch (err) {
-    res.status(500).json({ msg: err.message });
+    res.status(400).json(err.message);
   }
-};
+}
+
 export const changePassword = async (req, res) => {
   
   try {
@@ -110,18 +111,22 @@ export const login = async (req, res) => {
   try {
     const { phone, password } = req.body;
 
+    console.log(phone, password)
+
     const user = await User.findOne({ phone: phone });
     if (!user) return res.status(400).json({ msg: "존재하지 않는 사용자입니다 " });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ msg: "비밀번호가 일치하지 않습니다. " });
-
+    console.log(user)
     if (user.approval === false) {
-       return res.status(400).json({ msg: "관리자 승인이 되지 않았습니다. 관리자의 승인 후 사용가능합니다." });
+       throw new Error("관리자 승인이 되지 않았습니다. 관리자의 승인 후 사용가능합니다.");
     }
 
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) throw new Error("비밀번호가 일치하지 않습니다.");
+
+
     if (user.suspended === true) {
-       return res.status(400).json({ msg: "사용이 중지된 사용자입니다. 관리자에게 문의해주세요" });
+       throw new Error("사용이 중지된 사용자입니다. 관리자에게 문의해주세요.");
     }
 
     const lastLogined = new Date().toISOString().slice(0, 10)
@@ -139,6 +144,6 @@ export const login = async (req, res) => {
     delete user.password;
     res.status(200).json({ token, user });
   } catch (err) {
-    res.status(500).json({ msg: "서버 오류" });
+    res.status(400).json(err.message);
   }
 };
